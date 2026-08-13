@@ -1,0 +1,73 @@
+name: vps-resume-all-build
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    defaults:
+      run:
+        working-directory: codex-rs
+    env:
+      CARGO_NET_GIT_FETCH_WITH_CLI: "true"
+      AWS_LC_SYS_NO_JITTER_ENTROPY: "1"
+      AWS_LC_SYS_NO_JITTER_ENTROPY_x86_64_unknown_linux_musl: "1"
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@e081816240890017053eacbb1bdf337761dc5582 # 1.95.0
+        with:
+          targets: x86_64-unknown-linux-musl
+          components: rustfmt
+      - uses: mlugg/setup-zig@d1434d08867e3ee9daa34448df10607b98908d29 # v2.2.1
+        with:
+          version: 0.14.0
+          use-cache: false
+      - name: Use hermetic Cargo home
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo_home="${GITHUB_WORKSPACE}/.cargo-home"
+          mkdir -p "${cargo_home}/bin"
+          : > "${cargo_home}/config.toml"
+          echo "CARGO_HOME=${cargo_home}" >> "$GITHUB_ENV"
+          echo "${cargo_home}/bin" >> "$GITHUB_PATH"
+      - name: Install musl build tools
+        shell: bash
+        env:
+          TARGET: x86_64-unknown-linux-musl
+        run: bash "${GITHUB_WORKSPACE}/.github/scripts/install-musl-build-tools.sh"
+      - name: Configure rusty_v8 artifact
+        uses: ./.github/actions/setup-rusty-v8
+        with:
+          target: x86_64-unknown-linux-musl
+      - name: Format and focused test
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo fmt -- --config imports_granularity=Item --check
+          cargo test -p codex-tui local_show_all_picker_omits_provider_filter
+      - name: Build exact-version Codex binary
+        shell: bash
+        run: |
+          set -euo pipefail
+          target=x86_64-unknown-linux-musl
+          cargo build --locked --release --target "$target" --bin codex
+          strip --strip-debug --strip-unneeded "target/${target}/release/codex"
+          "target/${target}/release/codex" --version
+          sha256sum "target/${target}/release/codex" > "target/${target}/release/codex.sha256"
+      - name: Upload binary and digest
+        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
+        with:
+          name: codex-v0.146.0-resume-all-linux-x64
+          path: |
+            codex-rs/target/x86_64-unknown-linux-musl/release/codex
+            codex-rs/target/x86_64-unknown-linux-musl/release/codex.sha256
+          if-no-files-found: error
+          retention-days: 7
