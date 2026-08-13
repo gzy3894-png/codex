@@ -355,7 +355,7 @@ async fn run_resume_picker_with_launch_context(
         app_server.remote_cwd_override(),
     );
     let local_filter_cwd = local_picker_cwd_filter(&cwd_filter, uses_remote_workspace);
-    let provider_filter = picker_provider_filter(config, uses_remote_workspace);
+    let provider_filter = picker_provider_filter(config, uses_remote_workspace, show_all);
     let runtime_keymap = picker_runtime_keymap(config)?;
     let options = SessionPickerRunOptions {
         show_all,
@@ -401,7 +401,7 @@ pub async fn run_fork_picker_with_app_server(
         app_server.remote_cwd_override(),
     );
     let local_filter_cwd = local_picker_cwd_filter(&cwd_filter, uses_remote_workspace);
-    let provider_filter = picker_provider_filter(config, uses_remote_workspace);
+    let provider_filter = picker_provider_filter(config, uses_remote_workspace, show_all);
     let runtime_keymap = picker_runtime_keymap(config)?;
     let options = SessionPickerRunOptions {
         show_all,
@@ -522,11 +522,27 @@ fn local_picker_cwd_filter(
     }
 }
 
-fn picker_provider_filter(config: &Config, uses_remote_workspace: bool) -> ProviderFilter {
-    if uses_remote_workspace {
+fn picker_provider_filter(
+    config: &Config,
+    uses_remote_workspace: bool,
+    show_all: bool,
+) -> ProviderFilter {
+    picker_provider_filter_for_provider(
+        config.model_provider_id.as_str(),
+        uses_remote_workspace,
+        show_all,
+    )
+}
+
+fn picker_provider_filter_for_provider(
+    default_provider: &str,
+    uses_remote_workspace: bool,
+    show_all: bool,
+) -> ProviderFilter {
+    if uses_remote_workspace || show_all {
         ProviderFilter::Any
     } else {
-        ProviderFilter::MatchDefault(config.model_provider_id.to_string())
+        ProviderFilter::MatchDefault(default_provider.to_string())
     }
 }
 
@@ -3581,6 +3597,26 @@ mod tests {
             params.cwd,
             Some(ThreadListCwdFilter::One(String::from("repo/on/server")))
         );
+    }
+
+    #[test]
+    fn local_show_all_picker_omits_provider_filter() {
+        assert!(matches!(
+            picker_provider_filter_for_provider(
+                "openai",
+                /*uses_remote_workspace*/ false,
+                /*show_all*/ true,
+            ),
+            ProviderFilter::Any
+        ));
+        assert!(matches!(
+            picker_provider_filter_for_provider(
+                "openai",
+                /*uses_remote_workspace*/ false,
+                /*show_all*/ false,
+            ),
+            ProviderFilter::MatchDefault(provider) if provider == "openai"
+        ));
     }
 
     #[test]
